@@ -17,7 +17,7 @@ are now available in R.
 ## Installation
 
 ``` r
-pak::pak("JulioCollazos64/routing")
+remotes::install_github("JulioCollazos64/routing")
 ```
 
 Let’s look at an example:
@@ -25,10 +25,10 @@ Let’s look at an example:
 ``` r
 library(routing)
 router <- Router$new()
-router$use(function(req,res){
+router$use(function(req, res) {
   print(req)
 })
-router$get("/hello", function(req,res){
+router$get("/hello", function(req, res) {
   res$send("Hello world!")
 })
 ```
@@ -47,6 +47,359 @@ things that matter from this code snippet:
 
 Moreover, the routing mechanism happens in the *same order you write
 your code* so you can read how your request goes from top to bottom.
+
+## Usage in Web Frameworks:
+
+You can get pretty far by using only `routing` for your web development
+projects. In the following example, we have a router with only one route
+and two handlers, half of the time a **call** to this **app** returns
+“HEADS” and the other half returns “TAILS” depending on the value of
+`runif(1)`
+
+``` r
+library(routing)
+router <- Router$new()
+
+router$get(
+  "/",
+  function(req, res) {
+    if (runif(1) < .5) {
+      return(forward())
+    }
+
+    list(
+      status = 200L,
+      headers = list(
+        "Content-Type" = "text/html"
+      ),
+      body = "HEADS"
+    )
+  },
+  function(req, res) {
+    list(
+      status = 200L,
+      headers = list(
+        "Content-Type" = "text/html"
+      ),
+      body = "TAILS"
+    )
+  }
+)
+
+
+responses <- vector(mode = "character", length = 1000)
+for (i in seq_len(1000)) {
+  request <- fiery::fake_request("http://your-next-project.com/")
+  response <- router$handle(request)
+  responses[i] <- response$body
+}
+
+
+table(responses)
+#> responses
+#> HEADS TAILS 
+#>   499   501
+```
+
+`routing` is meant to be used in pair with `httpuv` as such we can
+translate our boilerplate code into a real application with minimal
+effort:
+
+``` r
+server <- httpuv::startServer(
+  "0.0.0.0",
+  8080,
+  list(
+    call = function(req) {
+      router$handle(req)
+    }
+  )
+)
+```
+
+Now visit http://0.0.0.0:8080/ and see your web application in action.
+That’s all it takes to include to include `routing` in your R web
+framework! Now you have request parameters support through
+[pater](https://github.com/JulioCollazos64/pater) and all the features
+of Express routing.
+
+### Create a Response Class
+
+However, as you may have noticed already we had to manually specify our
+server response using `list()`, which is error-prone and time consuming.
+Moreover, we lack common needs such as response serialization to json.
+
+We need a better way of dealing with this. That’s why it’s advisable to
+create a response object at the start of your app call, here we provide
+a minimal response class but you can easily imagine one with more
+features.
+
+``` r
+Response <- R6::R6Class(
+  "Response",
+  public = list(
+    status = NULL,
+    headers = list(),
+    send = function(body = NULL) {
+      list(
+        status = self$status,
+        headers = self$headers,
+        body = body
+      )
+    }
+  )
+)
+```
+
+In order to pass this object through the router stack we will assign it
+to our Router handle method: `router$handle(req, Response$new())`
+
+Our handlers now can call the send method from the response class,
+saving a few keystrokes.
+
+### Use the default “catch” everything handler
+
+If in our application we were to visit http://0.0.0.0:8080/api we
+won’t get any response back from the server as we didn’t define a route
+for that path. For this cases it’s better to play safe and return a
+generic response saying that resource in our server couldn’t be found.
+As it’s such a common need `routing` provides this fallback
+automatically through the `finalHandler` function which catches any
+unhandled request.
+
+Out final application would look like:
+
+``` r
+server <- httpuv::startServer(
+  "0.0.0.0",
+  8080,
+  list(
+    call = function(req) {
+      res <- Response$new()
+      router$handle(req, res, finalHandler(req, res))
+    }
+  )
+)
+```
+
+## How a request goes through the Layer stack
+
+A Router in `routing` is a stack of routes, middlewares or other
+routers, conceptually each of them are a *Layer* of the stack, when a
+request comes in each Layer is checked *in the order they were added to
+the stack*, no ordering occurs. Whether a Layer matches or not a request
+depends not only on its current **matcher**, a function that determines
+whether theirs a mtach between the request PATH and the Layer path, but
+also on the previous Layers as **a Layer can modify the request PATH**.
+
+``` r
+router <- Router$new()
+router$get(
+  "/",
+  function(req, res) {
+    writeLines(
+      c("Handler for", req$PATH_INFO)
+    )
+
+    req$PATH_INFO <- "/foo"
+  }
+)
+
+router$get("/foo", function(req, res) {
+  list(
+    status = 200L,
+    body = "foo",
+    headers = list(
+      "Content-Type" = "text/html"
+    )
+  )
+})
+
+req <- fiery::fake_request("http://your-next-project/")
+
+router$handle(req)
+#> Handler for
+#> /
+#> $status
+#> [1] 200
+#> 
+#> $body
+#> [1] "foo"
+#> 
+#> $headers
+#> $headers$`Content-Type`
+#> [1] "text/html"
+```
+
+As you can see from this example the first route acted only as a
+middleware for *url-rewriting*, that’s why we say whether a Layer
+matches a given request depends on the previous Layers too.
+
+### A Layer matcher
+
+A Layer matcher is built with the help of `match` from the
+[pater](https://cran.r-project.org/package=pater)
+package, it uses the path you passed to `$use()` or `$route` (or its
+HTTP verb shortcuts), contrary to Ambiorix this path isn’t appended to
+the “Router basepath”, let’s look at an example:
+
+``` r
+app <- Router$new()
+api <- Router$new()
+
+api$get(c("/users", "/usuarios"), function(req, res) {
+  list(
+    status = 200L,
+    body = "We've got many users!",
+    headers = list(
+      "Content-Type" = "text/html"
+    )
+  )
+})
+
+app$use("/api", api)
+
+req <- fiery::fake_request("http://your-next-project.com/api/users")
+app$handle(req)
+#> $status
+#> [1] 200
+#> 
+#> $body
+#> [1] "We've got many users!"
+#> 
+#> $headers
+#> $headers$`Content-Type`
+#> [1] "text/html"
+```
+
+We said previously that a Router can have another as a Layer, and each
+Layer have it’s own matcher based on the path you’ve actually written.
+So `app` Router has a Router `api` with a matcher for any request
+starting with “/api”
+
+Our route for “/users” and “/usuarios” as a Layer has its own matcher
+set to match any request that matches those paths, in case you’re
+wondering here are the actual regexes used to match the request PATH.
+
+``` r
+lapply(
+  api$getStack()[[1]]$matchers,
+  FUN = function(s) {
+    environment(s)$regex
+  }
+)
+#> [[1]]
+#> [1] "(?i)^(?:\\/users)(?:\\/$)?$"
+#> 
+#> [[2]]
+#> [1] "(?i)^(?:\\/usuarios)(?:\\/$)?$"
+```
+
+You can see from those regexes that neither of them actually matches the
+path “/api/users”, what happens internally to make these sort of regexes
+actually match is *strip/trim* the basePath of the Router to the request
+path, so that it goes from “/api/users” to “/users”, which actually
+matches.
+
+### Layers everywhere
+
+The design in Express routing is such that the concept of Layer is also
+used in the Route class, this make it possible write code like the
+following:
+
+``` r
+router <- Router$new()
+logger <- function(req, res) {
+  print(req$PATH_INFO)
+}
+
+router$get(
+  "/foo",
+  # route specific middleware
+  logger,
+  # route handler
+  function(req, res) {
+    list(
+      status = 200L,
+      body = "bar",
+      headers = list(
+        "Content-Type" = "text/html"
+      )
+    )
+  },
+  function(req, res) {
+    print("Never called")
+  }
+)
+
+layer <- router$getStack()[[1]]
+# A route's Layer stack
+layer$route$stack
+#> [[1]]
+#> <Layer>
+#>   Public:
+#>     clone: function (deep = FALSE) 
+#>     handleError: function (error, req, res, forward) 
+#>     handleRequest: function (req, res, forward) 
+#>     initialize: function (path, options, fn) 
+#>     keys: list
+#>     match: function (path) 
+#>     matchers: list
+#>     method: get
+#>     params: list
+#>     path: 
+#>     route: NULL
+#>     slash: FALSE
+#>   Private:
+#>     handler: function (req, res, forward) 
+#> 
+#> [[2]]
+#> <Layer>
+#>   Public:
+#>     clone: function (deep = FALSE) 
+#>     handleError: function (error, req, res, forward) 
+#>     handleRequest: function (req, res, forward) 
+#>     initialize: function (path, options, fn) 
+#>     keys: list
+#>     match: function (path) 
+#>     matchers: list
+#>     method: get
+#>     params: list
+#>     path: 
+#>     route: NULL
+#>     slash: FALSE
+#>   Private:
+#>     handler: function (req, res, forward) 
+#> 
+#> [[3]]
+#> <Layer>
+#>   Public:
+#>     clone: function (deep = FALSE) 
+#>     handleError: function (error, req, res, forward) 
+#>     handleRequest: function (req, res, forward) 
+#>     initialize: function (path, options, fn) 
+#>     keys: list
+#>     match: function (path) 
+#>     matchers: list
+#>     method: get
+#>     params: list
+#>     path: 
+#>     route: NULL
+#>     slash: FALSE
+#>   Private:
+#>     handler: function (req, res, forward)
+```
+
+So when a request comes to “/foo” it matches the first Router Layer,
+which happens to be a Route, then the route dispatch the request into
+its own stack of layers, which in turn process the request until one of
+them actually respond, in this case this happens at the second Layer.
+
+In summary, when we think of a Route Layer we see that it has its own
+way of handling the request instead of just being the `handlers` we just
+wrote it’s a method that dispatches the requests into their handlers.
+Just like a Router dispatches a request into a middleware, route or
+another Router.
 
 ## How it differs from Express.js
 

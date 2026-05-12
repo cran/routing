@@ -8,11 +8,10 @@ Layer <- R6::R6Class(
       options[["strict"]] <- NULL
       self$matchers <- lapply(path, matcher, options)
 
-      self$handler <- withforward(fn)
+      private$handler <- withforward(fn)
       self$slash <- identical(path, "/") && isFALSE(options$end)
     },
     matchers = list(),
-    handler = NULL,
     path = character(0),
     params = list(),
     keys = list(),
@@ -20,7 +19,7 @@ Layer <- R6::R6Class(
     method = character(0),
     slash = logical(0),
     handleError = function(error, req, res, forward) {
-      fn <- self$handler
+      fn <- private$handler
       if (length(formalArgs(fn)) != 4) {
         return(forward(error))
       }
@@ -28,6 +27,10 @@ Layer <- R6::R6Class(
       tryCatch(
         expr = {
           ret <- fn(error, req, res, forward)
+
+          if (isResponse(ret)) {
+            return(ret)
+          }
 
           if (isPromise(ret)) {
             return(
@@ -43,7 +46,7 @@ Layer <- R6::R6Class(
             )
           }
 
-          ret
+          forward(err)
         },
         error = function(err) {
           forward(err)
@@ -51,7 +54,7 @@ Layer <- R6::R6Class(
       )
     },
     handleRequest = function(req, res, forward) {
-      fn <- self$handler
+      fn <- private$handler
 
       if (length(formalArgs(fn)) > 3) {
         return(forward())
@@ -61,6 +64,10 @@ Layer <- R6::R6Class(
         expr = {
           ret <- fn(req, res, forward)
 
+          if (isResponse(ret)) {
+            return(ret)
+          }
+
           if (isPromise(ret)) {
             return(
               promises::then(
@@ -73,10 +80,6 @@ Layer <- R6::R6Class(
                 }
               )
             )
-          }
-
-          if (isResponse(ret) || inherits(ret, "forward")) {
-            return(ret)
           }
 
           forward()
@@ -112,6 +115,9 @@ Layer <- R6::R6Class(
 
       return(TRUE)
     }
+  ),
+  private = list(
+    handler = NULL
   )
 )
 

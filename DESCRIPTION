@@ -1,6 +1,6 @@
 Package: routing
 Title: 'Express.js' Like Routing for R Web Frameworks
-Version: 1.0.0
+Version: 1.1.0
 Authors@R: c(
     person("Julio", "Collazos", , "amarullazo626@gmail.com", role = c("aut", "cre"), comment = c(ORCID = "0009-0006-5503-0997")),
     person(,"router contributors", role = c("ctb","cph"),
@@ -17,11 +17,11 @@ Config/testthat/edition: 3
 URL: https://github.com/JulioCollazos64/routing
 BugReports: https://github.com/JulioCollazos64/routing/issues
 NeedsCompilation: no
-Packaged: 2026-04-23 12:25:15 UTC; julio
+Packaged: 2026-05-12 01:19:51 UTC; julio
 Author: Julio Collazos [aut, cre] (ORCID:
     <https://orcid.org/0009-0006-5503-0997>),
   router contributors [ctb, cph] (router contributors; authors listed in
     <https://github.com/pillarjs/router/graphs/contributors>)
 Maintainer: Julio Collazos <amarullazo626@gmail.com>
 Repository: CRAN
-Date/Publication: 2026-04-27 14:30:03 UTC
+Date/Publication: 2026-05-12 05:10:02 UTC

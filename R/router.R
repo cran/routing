@@ -121,7 +121,7 @@ Router <- R6::R6Class(
     #' @param res (`Response`)\cr Response object.
     #' @param callback (`function`)\cr
     #'   Called when no layer matched or an unhandled error occurred.
-    handle = function(req, res, callback) {
+    handle = function(req, res = NULL, callback = NULL) {
       idx <- 1
       removed <- ""
       slashAdded <- FALSE
@@ -137,34 +137,17 @@ Router <- R6::R6Class(
       req$originalUrl <- req$originalUrl %||% req$PATH_INFO
 
       forward <- function(err = NULL) {
-        # signal that handler called forward
-        do.call(
-          on.exit,
-          list(
-            substitute({
-              .rv <- returnValue()
-              return(
-                structure(
-                  .rv %||% list(),
-                  class = c(class(.rv), "forward")
-                )
-              )
-            })
-          ),
-          envir = parent.frame()
-        )
-
         layerError <- if (identical(err, "route")) NULL else err
 
         if (slashAdded) {
-          req$PATH_INFO <<- gsub("^.", "", req$PATH_INFO)
+          req$PATH_INFO <- gsub("^.", "", req$PATH_INFO)
           slashAdded <<- FALSE
         }
 
         # restore altered req.url
         if (nzchar(removed)) {
-          req$baseUrl <<- parentUrl
-          req$PATH_INFO <<- paste0(removed, req$PATH_INFO)
+          req$baseUrl <- parentUrl
+          req$PATH_INFO <- paste0(removed, req$PATH_INFO)
 
           removed <<- ""
         }
@@ -274,16 +257,16 @@ Router <- R6::R6Class(
 
           # strip prefix from path
           removed <<- layerPath
-          req$PATH_INFO <<- substring(req$PATH_INFO, nchar(removed) + 1L)
+          req$PATH_INFO <- substring(req$PATH_INFO, nchar(removed) + 1L)
 
           # ensure leading slash
           if (!startsWith(req$PATH_INFO, "/")) {
-            req$PATH_INFO <<- paste0("/", req$PATH_INFO)
+            req$PATH_INFO <- paste0("/", req$PATH_INFO)
             slashAdded <<- TRUE
           }
 
           # update baseUrl (no trailing slash)
-          req$baseUrl <<- paste0(
+          req$baseUrl <- paste0(
             parentUrl,
             if (endsWith(removed, "/")) {
               substring(removed, 1L, nchar(removed) - 1L)
@@ -442,6 +425,22 @@ Router <- R6::R6Class(
       invisible(self)
     },
     #' @description
+    #' Registers a directory of static files to be served at a given URL prefix.
+    #' Static files are served directly by httpuv's background I/O thread without
+    #' invoking R.
+    #' @param root (`character(1)`)\cr
+    #'   Local filesystem path to the directory containing the files to serve.
+    #' @param url (`character(1)`)\cr
+    #'   URL prefix at which the files will be available (e.g. `"/static"`).
+    #' @param ... Additional arguments passed to [httpuv::staticPath()].
+    #' @return `self` invisibly.
+    static = function(root, url, ...) {
+      stopifnot("Argument root should be a character" = is.character(root))
+      stopifnot("Argument url should be a character" = is.character(url))
+      private$statics[[url]] <- httpuv::staticPath(root, ...)
+      invisible(self)
+    },
+    #' @description
     #' Returns the internal layer stack.
     #' @return `list` of `Layer` objects.
     getStack = function() {
@@ -454,6 +453,7 @@ Router <- R6::R6Class(
     mergeParams = logical(0),
     strict = logical(0),
     params = list(),
+    statics = list(),
     processParams = function(params, layer, called, req, res, done) {
       keys <- layer$keys
 

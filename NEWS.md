@@ -1,3 +1,11 @@
+# routing 1.1.1
+
+* Fixed routing to match when `req$REQUEST_METHOD` is `NULL`, for
+  compatibility with upstream.
+* Fixed an error handler silently losing the original error when it
+  didn't respond or forward.
+* Internal test suite changes only, no other user-facing changes.
+
 # routing 1.1.0
 
 * Added `$static()` method to serve static files via httpuv's background I/O
